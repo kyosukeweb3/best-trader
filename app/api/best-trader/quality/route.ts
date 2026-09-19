@@ -204,20 +204,28 @@ export async function GET(req: NextRequest) {
     const stats = buildStats(fills.rows, start);
 
     let status = "PASS";
-    if (
-      stats.orders < 20 ||
+
+    if (stats.orders === 0) {
+      status = "NO_REALIZED_SAMPLE";
+    } else if (
       stats.netPnl <= 0 ||
-      (stats.profitFactor != null && stats.profitFactor < 1.2)
+      (stats.profitFactor != null && stats.profitFactor < 1.0)
     ) {
-      status = "WEAK";
-    }
-    if (fills.partial && status === "PASS") status = "PASS_PARTIAL";
-    if (
-      stats.top1WinShare != null &&
-      stats.top1WinShare > 0.55 &&
-      status.startsWith("PASS")
+      status = "FAIL";
+    } else if (
+      (stats.top1WinShare != null && stats.top1WinShare > 0.55) ||
+      (stats.top3WinShare != null && stats.top3WinShare > 0.85)
     ) {
       status = "REVIEW_CONCENTRATED";
+    } else if (stats.orders < 20) {
+      status = "REVIEW_LOW_SAMPLE";
+    } else if (
+      stats.profitFactor != null &&
+      stats.profitFactor < 1.2
+    ) {
+      status = "REVIEW_WEAK_EDGE";
+    } else if (fills.partial) {
+      status = "PASS_PARTIAL";
     }
 
     return NextResponse.json({
