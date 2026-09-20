@@ -1,7 +1,7 @@
 import {NextResponse} from "next/server";
 import {traders} from "@/lib/tracker/traders";
 import {liveTrader} from "@/lib/tracker/live";
-import {hasNeon,saveNeon} from "@/lib/tracker/neon-store";
+import {acquireCollectorLease,hasNeon,releaseCollectorLease,saveNeon} from "@/lib/tracker/neon-store";
 
 export const runtime="nodejs";
 export const maxDuration=300;
@@ -16,17 +16,26 @@ export async function GET(request:Request){
   if(!authorized(request))return NextResponse.json({error:"Unauthorized"},{status:401});
   if(!hasNeon())return NextResponse.json({error:"DATABASE_URL is not configured"},{status:503});
 
-  const results:{id:string;ok:boolean;message?:string}[]=[];
-  for(const trader of traders){
-    try{
-      const data=await liveTrader(trader.id);
-      await saveNeon(data);
-      results.push({id:trader.id,ok:true});
-    }catch(e){
-      results.push({id:trader.id,ok:false,message:String((e as Error)?.message||e)});
-    }
+  const lease=await acquireCollectorLease();
+  if(!lease){
+    return NextResponse.json({ok:true,skipped:true,reason:"collector_already_running"});
   }
 
-  const ok=results.every(r=>r.ok);
-  return NextResponse.json({ok,updatedAt:Date.now(),results},{status:ok?200:207});
+  const results:{id:string;ok:boolean;message?:string}[]=[];
+  try{
+    for(const trader of traders){
+      try{
+        const data=await liveTrader(trader.id);
+        await saveNeon(data);
+        results.push({id:trader.id,ok:true});
+      }catch(e){
+        results.push({id:trader.id,ok:false,message:String((e as Error)?.message||e)});
+      }
+    }
+
+    const ok=results.every(r=>r.ok);
+    return NextResponse.json({ok,updatedAt:Date.now(),results},{status:ok?200:207});
+  }finally{
+    await releaseCollectorLease(lease);
+  }
 }
