@@ -57,6 +57,13 @@ async function ensureSchema(){
     `;
     await sql`CREATE INDEX IF NOT EXISTS bt_snapshots_trader_time_idx ON bt_snapshots(trader,time DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS bt_events_trader_time_idx ON bt_events(trader,time DESC)`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS bt_collector_lock(
+        id INTEGER PRIMARY KEY,
+        token TEXT NOT NULL,
+        lease_until BIGINT NOT NULL
+      )
+    `;
   })().catch(e=>{schemaReady=null;throw e});
   return schemaReady;
 }
@@ -154,4 +161,32 @@ export async function readNeon(id:string):Promise<Persisted|null>{
   const events=eventRows.map(row=>parsed<TrackerEvent>(row.data));
 
   return {...base,history,events,persistent:true};
+}
+
+
+export async function acquireCollectorLease(ttlMs=240000){
+  await ensureSchema();
+  const sql=client();
+  const token=crypto.randomUUID();
+  const now=Date.now();
+  const leaseUntil=now+ttlMs;
+  const rows=await sql`
+    INSERT INTO bt_collector_lock(id,token,lease_until)
+    VALUES(1,${token},${leaseUntil})
+    ON CONFLICT(id) DO UPDATE
+      SET token=EXCLUDED.token, lease_until=EXCLUDED.lease_until
+      WHERE bt_collector_lock.lease_until < ${now}
+    RETURNING token
+  `;
+  return rows[0]?.token===token ? token : null;
+}
+
+export async function releaseCollectorLease(token:string){
+  await ensureSchema();
+  const sql=client();
+  await sql`
+    UPDATE bt_collector_lock
+    SET lease_until=0
+    WHERE id=1 AND token=${token}
+  `;
 }
