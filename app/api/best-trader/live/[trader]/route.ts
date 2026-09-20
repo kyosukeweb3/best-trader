@@ -17,24 +17,28 @@ export async function GET(_:Request,{params}:{params:Promise<{trader:string}>}){
 
   try{
     if(hasNeon()){
-      const stored=await readNeon(trader);
-      if(stored && Date.now()-stored.updatedAt<30000){
-        return NextResponse.json(stored,{headers:{"Cache-Control":"no-store"}});
-      }
-
       try{
-        const fresh=await liveTrader(trader);
-        await saveNeon(fresh);
-        const value=await readNeon(trader);
-        if(value)return NextResponse.json(value,{headers:{"Cache-Control":"no-store"}});
-      }catch(e){
-        if(stored){
-          return NextResponse.json(
-            {...stored,errors:[...stored.errors,"最新データの取得に失敗したため、保存済みデータを表示しています。"]},
-            {headers:{"Cache-Control":"no-store"}}
-          );
+        const stored=await readNeon(trader);
+        if(stored && Date.now()-stored.updatedAt<30000){
+          return NextResponse.json(stored,{headers:{"Cache-Control":"no-store"}});
         }
-        throw e;
+
+        try{
+          const fresh=await liveTrader(trader);
+          await saveNeon(fresh);
+          const value=await readNeon(trader);
+          if(value)return NextResponse.json(value,{headers:{"Cache-Control":"no-store"}});
+        }catch(e){
+          if(stored){
+            return NextResponse.json(
+              {...stored,errors:[...stored.errors,"最新データの取得に失敗したため、保存済みデータを表示しています。"]},
+              {headers:{"Cache-Control":"no-store"}}
+            );
+          }
+          throw e;
+        }
+      }catch(e){
+        console.error("Neon tracker unavailable",e);
       }
     }
 
